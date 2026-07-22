@@ -2,7 +2,7 @@
 # =============================================================================
 # setup-hermes.sh — Install and configure Hermes agent for a local Ollama setup
 #
-# Usage: setup-hermes.sh [target_user] [path/to/context.md]
+# Usage: setup-hermes.sh [target_user]
 # Idempotent: safe to re-run.
 #
 # What it does:
@@ -15,19 +15,10 @@
 #      only sets context_length as a ceiling and lets Hermes auto-detect
 #      per-model from Ollama. See README.md, "Context length: what actually
 #      happens" before adding a second model alias.
-#   4. Copies the given context.md (if any) into ~/.hermes/ — this is your
-#      own project's Hermes system-prompt context, not part of this repo
-#
-# NOTE: this intentionally does NOT wire up a Claude/Anthropic-API model
-# alias. Hermes' remote-model support needs a billed console.anthropic.com
-# API key — separate from (and not covered by) a Claude Code subscription.
-# If you want Claude available inside Hermes, add your own model_aliases
-# entry in ~/.hermes/config.yaml with your own API key.
 # =============================================================================
 set -euo pipefail
 
 TARGET_USER="${1:-devuser}"
-CONTEXT_SRC="${2:-}"
 USER_HOME="/home/${TARGET_USER}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -134,14 +125,6 @@ print(f"  config.yaml patched. Aliases: {', '.join(aliases)} (default: {default_
 PYEOF
 
 chown "$TARGET_USER:$TARGET_USER" "$HERMES_CONF"
-
-# --- Step 4: Copy context.md ---
-CONTEXT_DST="$USER_HOME/.hermes/context.md"
-if [[ -n "$CONTEXT_SRC" && -f "$CONTEXT_SRC" ]]; then
-    cp "$CONTEXT_SRC" "$CONTEXT_DST"
-    chown "$TARGET_USER:$TARGET_USER" "$CONTEXT_DST"
-    echo "  context.md installed to ~/.hermes/"
-fi
 
 echo ""
 echo "  Hermes setup complete."

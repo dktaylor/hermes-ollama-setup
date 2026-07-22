@@ -8,14 +8,10 @@ See [DECISIONS.md](DECISIONS.md) for why this repo is shaped the way it is.
 ## `setup-hermes.sh` — installs and configures Hermes
 
 ```bash
-./setup-hermes.sh [target_user] [path/to/context.md]
+./setup-hermes.sh [target_user]
 ```
 
 - `target_user` — the user to install Hermes for (default: `devuser`).
-- `path/to/context.md` — optional. If given, its content is copied to
-  `~/.hermes/context.md` and picked up as Hermes' injected session context.
-  This is *your* project's context — nothing project-specific ships in this
-  repo.
 
 What it does, idempotently (safe to re-run):
 
@@ -26,7 +22,6 @@ What it does, idempotently (safe to re-run):
    [`hermes.conf`](hermes.conf) (see **Configuration** and **Context
    length: what actually happens** below — read that before adding a
    second model alias).
-4. Copies your `context.md` in, if you passed one.
 
 ## Configuration
 
@@ -106,9 +101,6 @@ writes to another user's home if `target_user` isn't you).
   above its real context to clear that bar can exceed your VRAM budget
   instead — see [DECISIONS.md](DECISIONS.md) for what happened when this repo
   shipped a second alias without checking first.
-
-**Not included:** a Claude/Anthropic-API model alias, or an MCP/RAG bridge.
-See [DECISIONS.md](DECISIONS.md) for why.
 
 ## License
 

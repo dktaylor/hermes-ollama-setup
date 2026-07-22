@@ -33,19 +33,6 @@ via source (`hermes_cli/model_switch.py`). Adding a second alias later
 needs a model that clears both constraints, verified via `/api/show`
 first, not assumed.
 
-## No Claude/Anthropic model alias in the defaults
-
-**Why:** Hermes' remote-model support needs a billed
-console.anthropic.com API key, separate from (and not covered by) a Claude
-Code subscription — would ship broken/unusable by default.
-
-## No MCP/RAG bridge in this repo
-
-**Why:** `mcp/openwebui-mcp.py` here was a stale fork of what
-[rag-stack](https://github.com/dktaylor/rag-stack) has since evolved
-independently and much further, with its own real git history. Removed
-rather than ship a duplicate that would drift again.
-
 ## KV cache quantization is not configurable per-model here
 
 **Why:** it's a daemon-wide Ollama setting (`OLLAMA_KV_CACHE_TYPE`), not
@@ -55,9 +42,8 @@ daemons on different ports, which doesn't add VRAM (same GPU either way)
 and isn't implemented here. Flagged as a possible future direction, not
 attempted.
 
-## `context.md` doesn't ship in this repo
+## No external context/config injection in this script
 
-**Why:** it's inherently project-specific (repo structure, hardware,
-session context for one particular use of Hermes) — this repo ships the
-generic installer, not an example that would mislead someone into thinking
-it's meant for their project.
+**Why:** keeps this installer scoped to exactly one job — wiring Hermes to
+a local Ollama endpoint. Anything project-specific belongs in whatever's
+calling this script, not baked into it.
