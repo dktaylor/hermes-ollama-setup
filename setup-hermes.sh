@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# setup-hermes.sh — Install and configure Hermes agent for a local Ollama +
-# Claude Opus "brain" alias setup
+# setup-hermes.sh — Install and configure Hermes agent for a local Ollama setup
 #
 # Usage: setup-hermes.sh [target_user] [path/to/context.md]
 # Idempotent: safe to re-run.
@@ -9,10 +8,16 @@
 # What it does:
 #   1. Installs ripgrep (required by Hermes)
 #   2. Downloads and installs Hermes agent to ~/.hermes/
-#   3. Writes ~/.hermes/config.yaml (Ollama primary + Claude brain aliases)
+#   3. Writes ~/.hermes/config.yaml (points at local Ollama; local/local-8b
+#      model aliases for switching between local models)
 #   4. Copies the given context.md (if any) into ~/.hermes/ — this is your
 #      own project's Hermes system-prompt context, not part of this repo
-#   5. Leaves ANTHROPIC_API_KEY placeholder in ~/.hermes/.env
+#
+# NOTE: this intentionally does NOT wire up a Claude/Anthropic-API model
+# alias. Hermes' remote-model support needs a billed console.anthropic.com
+# API key — separate from (and not covered by) a Claude Code subscription.
+# If you want Claude available inside Hermes, add your own model_aliases
+# entry in ~/.hermes/config.yaml with your own API key.
 # =============================================================================
 set -euo pipefail
 
@@ -89,12 +94,6 @@ if 'ollama_num_ctx' not in content:
 if 'model_aliases:' not in content:
     aliases = """
 model_aliases:
-  brain:
-    model: claude-opus-4-8
-    provider: anthropic
-  claude:
-    model: claude-sonnet-4-6
-    provider: anthropic
   local:
     model: qwen3.5:4b
     provider: custom
@@ -123,21 +122,10 @@ if [[ -n "$CONTEXT_SRC" && -f "$CONTEXT_SRC" ]]; then
     echo "  context.md installed to ~/.hermes/"
 fi
 
-# --- Step 5: ANTHROPIC_API_KEY placeholder in .env ---
-HERMES_ENV="$USER_HOME/.hermes/.env"
-if ! grep -q '^ANTHROPIC_API_KEY=' "$HERMES_ENV" 2>/dev/null; then
-    echo "" >> "$HERMES_ENV"
-    echo "# Anthropic API key for 'brain' / Claude aliases (console.anthropic.com)" >> "$HERMES_ENV"
-    echo "ANTHROPIC_API_KEY=REPLACE_ME" >> "$HERMES_ENV"
-    chown "$TARGET_USER:$TARGET_USER" "$HERMES_ENV"
-    echo "  ANTHROPIC_API_KEY placeholder added to ~/.hermes/.env"
-    echo "  ACTION REQUIRED: replace REPLACE_ME with your key from console.anthropic.com"
-fi
-
 echo ""
 echo "  Hermes setup complete."
 echo "  Usage:"
-echo "    hermes -z 'your task'           # local Ollama (routine)"
-echo "    hermes -m brain -z 'your task'  # Claude Opus (complex)"
+echo "    hermes -z 'your task'           # local Ollama (default model)"
+echo "    hermes -m local-8b -z 'your task'  # local Ollama (8b fallback)"
 echo "    hermes                          # interactive session"
 echo "=============================================="
