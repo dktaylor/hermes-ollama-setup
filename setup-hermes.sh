@@ -8,11 +8,13 @@
 # What it does:
 #   1. Installs ripgrep (required by Hermes)
 #   2. Downloads and installs Hermes agent to ~/.hermes/
-#   3. Writes ~/.hermes/config.yaml (points at local Ollama; local/local-8b
-#      model aliases for switching between local models) — model/context
-#      settings come from hermes.conf (edit it, or export the same-named
-#      env vars before running this script). See README.md for what the
-#      shipped defaults are tuned for.
+#   3. Writes ~/.hermes/config.yaml (points at local Ollama; a model_aliases
+#      entry per HERMES_ALIASES) — model/context settings come from
+#      hermes.conf (edit it, or export the same-named env vars before
+#      running this script). Does NOT force a per-model context value —
+#      only sets context_length as a ceiling and lets Hermes auto-detect
+#      per-model from Ollama. See README.md, "Context length: what actually
+#      happens" before adding a second model alias.
 #   4. Copies the given context.md (if any) into ~/.hermes/ — this is your
 #      own project's Hermes system-prompt context, not part of this repo
 #
@@ -70,6 +72,15 @@ fi
 # Patch key settings in-place (preserves all other defaults). Values come
 # from hermes.conf (HERMES_ALIASES / HERMES_DEFAULT_ALIAS /
 # HERMES_CONTEXT_LENGTH / OLLAMA_BASE_URL), exported above.
+#
+# Deliberately does NOT set ollama_num_ctx. Hermes auto-detects the real
+# per-model context from Ollama's /api/show when it's unset, which is what
+# makes it safe to eventually have more than one alias here — a hardcoded
+# global ollama_num_ctx forces the SAME value onto every model regardless
+# of what it actually supports (confirmed: forcing a too-large context onto
+# a smaller-context model doesn't just get clamped cleanly — it can blow
+# the VRAM budget and tank performance). context_length still acts as a
+# ceiling on whatever gets auto-detected. See README.md.
 python3 - "$HERMES_CONF" <<'PYEOF'
 import os, sys, re
 
@@ -98,23 +109,13 @@ patches = [
     # Base URL
     (r'(^\s*)base_url:\s*"https://openrouter\.ai/api/v1"',
      rf'\1base_url: "{base_url}"'),
-    # Context length (commented-out placeholder in Hermes' stock config.yaml)
+    # Context length ceiling (commented-out placeholder in Hermes' stock
+    # config.yaml) — NOT ollama_num_ctx, see comment above.
     (r'#\s*context_length:\s*\d+', f'context_length: {context_len}'),
 ]
 
 for pattern, replacement in patches:
     content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
-
-# Add ollama_num_ctx after context_length if not present. Must stay in sync
-# with whatever your Ollama daemon is actually configured for
-# (OLLAMA_CONTEXT_LENGTH) — Ollama's /v1 endpoint can silently ignore this
-# and fall back to the daemon default instead (verified: an unset daemon
-# default loads at 4096, not the model's real context window).
-if 'ollama_num_ctx' not in content:
-    content = content.replace(
-        f'context_length: {context_len}',
-        f'context_length: {context_len}\n  ollama_num_ctx: {context_len}  # force this Ollama context window'
-    )
 
 # Add model_aliases block if not present — one entry per HERMES_ALIASES pair
 if 'model_aliases:' not in content:
