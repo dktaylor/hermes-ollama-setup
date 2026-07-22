@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
 # =============================================================================
-# setup-hermes.sh — Install and configure Hermes agent for devuser
+# setup-hermes.sh — Install and configure Hermes agent for a local Ollama +
+# Claude Opus "brain" alias setup
 #
-# Called from fedora-postinstall-setup.sh (step 45) and kickstart %post.
+# Usage: setup-hermes.sh [target_user] [path/to/context.md]
 # Idempotent: safe to re-run.
 #
 # What it does:
 #   1. Installs ripgrep (required by Hermes)
 #   2. Downloads and installs Hermes agent to ~/.hermes/
 #   3. Writes ~/.hermes/config.yaml (Ollama primary + Claude brain aliases)
-#   4. Copies hermes/context.md into ~/.hermes/
+#   4. Copies the given context.md (if any) into ~/.hermes/ — this is your
+#      own project's Hermes system-prompt context, not part of this repo
 #   5. Leaves ANTHROPIC_API_KEY placeholder in ~/.hermes/.env
 # =============================================================================
 set -euo pipefail
 
 TARGET_USER="${1:-devuser}"
-REPO_DIR="${2:-/home/${TARGET_USER}/fedora-build}"
+CONTEXT_SRC="${2:-}"
 USER_HOME="/home/${TARGET_USER}"
 
 run_as_user() {
     sudo -u "$TARGET_USER" env HOME="$USER_HOME" PATH="$USER_HOME/.local/bin:$PATH" "$@"
 }
 
-echo "[45] Installing Hermes agent..."
+echo "Installing Hermes agent..."
 echo "=============================================="
 
 # --- Step 1: ripgrep (required by Hermes) ---
@@ -114,9 +116,8 @@ PYEOF
 chown "$TARGET_USER:$TARGET_USER" "$HERMES_CONF"
 
 # --- Step 4: Copy context.md ---
-CONTEXT_SRC="$REPO_DIR/hermes/context.md"
 CONTEXT_DST="$USER_HOME/.hermes/context.md"
-if [[ -f "$CONTEXT_SRC" ]]; then
+if [[ -n "$CONTEXT_SRC" && -f "$CONTEXT_SRC" ]]; then
     cp "$CONTEXT_SRC" "$CONTEXT_DST"
     chown "$TARGET_USER:$TARGET_USER" "$CONTEXT_DST"
     echo "  context.md installed to ~/.hermes/"
