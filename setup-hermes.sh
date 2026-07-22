@@ -58,24 +58,29 @@ with open(path) as f:
 
 patches = [
     # Default model
-    (r'(^\s*default:\s*")[^"]*(")', r'\g<1>qwen2.5-coder:7b-instruct-q4_K_M\2'),
+    (r'(^\s*default:\s*")[^"]*(")', r'\g<1>qwen3.5:4b\2'),
     # Provider
     (r'(^\s*)provider:\s*"auto"', r'\1provider: "custom"  # local Ollama'),
     # Base URL
     (r'(^\s*)base_url:\s*"https://openrouter\.ai/api/v1"',
      r'\1base_url: "http://localhost:11434/v1"'),
-    # Context length override (bypass 64K minimum)
-    (r'#\s*context_length:\s*131072', 'context_length: 65536  # override 64K minimum check'),
+    # Context length: qwen3.5:4b is natively 262K (GDN hybrid, no n_ctx_train
+    # clamp) — 131072 is honest, not a padded-up workaround like the old
+    # 64K-minimum-check bypass was for qwen2.5-coder.
+    (r'#\s*context_length:\s*131072', 'context_length: 131072'),
 ]
 
 for pattern, replacement in patches:
     content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
 
 # Add ollama_num_ctx after context_length if not present
+# Must stay in sync with OLLAMA_CONTEXT_LENGTH in the ollama.service.d
+# override.conf — Ollama's /v1 endpoint can ignore this and silently fall
+# back to the daemon default (verified: unset daemon default loads at 4096).
 if 'ollama_num_ctx' not in content:
     content = content.replace(
-        'context_length: 65536  # override 64K minimum check',
-        'context_length: 65536  # override 64K minimum check\n  ollama_num_ctx: 65536  # force Ollama 64K context window'
+        'context_length: 131072',
+        'context_length: 131072\n  ollama_num_ctx: 131072  # force Ollama 131K context window'
     )
 
 # Add model_aliases block if not present
@@ -89,7 +94,11 @@ model_aliases:
     model: claude-sonnet-4-6
     provider: anthropic
   local:
-    model: qwen2.5-coder:7b-instruct-q4_K_M
+    model: qwen3.5:4b
+    provider: custom
+    base_url: "http://localhost:11434/v1"
+  local-8b:
+    model: qwen3:8b   # legacy fallback — clamps to 40960 ctx (no YaRN in GGUF)
     provider: custom
     base_url: "http://localhost:11434/v1"
 """

@@ -56,7 +56,7 @@ iso/                           # gitignored — base ISO + built custom ISOs
 
 - **GPU**: AMD Ryzen AI iGPU (desktop) + RTX 4060 laptop (PRIME offload)
 - **Disk**: nvme0n1 — EFI p1 shared with Windows, Fedora LVM on remaining space
-- **Ollama**: port 11434, model `qwen2.5-coder:7b-instruct-q4_K_M` (local)
+- **Ollama**: port 11434, model `qwen3.5:4b` (local), 131K context, q8_0 KV cache
 - **Open WebUI**: Docker, port 3000
 - Switch GPU/Ollama mode: `sudo ./scripts/ollama-gpu-mode.sh local|remote`
 
