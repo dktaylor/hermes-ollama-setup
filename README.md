@@ -3,6 +3,8 @@
 A small installer script for running [Hermes](https://hermes-agent.nousresearch.com/)
 (the CLI agent) against a local Ollama model.
 
+See [DECISIONS.md](DECISIONS.md) for why this repo is shaped the way it is.
+
 ## `setup-hermes.sh` — installs and configures Hermes
 
 ```bash
@@ -85,80 +87,28 @@ writes to another user's home if `target_user` isn't you).
 
 ## Context length: what actually happens
 
-This took real live-machine testing to pin down, so it's documented in full
-here rather than left to be re-derived later.
+- KV cache quantization (`OLLAMA_KV_CACHE_TYPE`) is daemon-wide in Ollama —
+  not per-model, not per-request. It's set on the *Ollama* side, and every
+  model that daemon serves shares it.
+- Context length genuinely can be per-model, but not via Hermes'
+  `model_aliases` config — there's no field for it there. Leaving
+  `ollama_num_ctx` unset (as shipped) makes Hermes auto-detect each active
+  model's real context from Ollama directly; `context_length` then only
+  caps that auto-detected value, it doesn't force it up.
+- Before adding a second `HERMES_ALIASES` entry, verify the model's real
+  context and check it'll actually fit your VRAM at that context — don't
+  assume:
+  ```bash
+  curl localhost:11434/api/show -d '{"name":"<model>"}'
+  # check model_info.*.context_length, and any Modelfile num_ctx under "parameters"
+  ```
+  Hermes refuses any model under 64K effective context, and a model forced
+  above its real context to clear that bar can exceed your VRAM budget
+  instead — see [DECISIONS.md](DECISIONS.md) for what happened when this repo
+  shipped a second alias without checking first.
 
-**KV cache quantization (`q8_0`, `q4_0`, `f16`, ...) is daemon-wide in
-Ollama, not per-model or per-request.** `OLLAMA_KV_CACHE_TYPE` is a single
-env var on the Ollama process — every model it serves uses the same
-quantization. There's no config on the Hermes or Ollama-request side to
-vary this per model. The only way to genuinely run two models at different
-KV quantizations at once is two separate Ollama daemons on different ports
-(each with its own `OLLAMA_HOST`, `OLLAMA_KV_CACHE_TYPE`, etc.) — a bigger
-undertaking, and one that doesn't add VRAM: both daemons still share the
-same physical GPU, so it only helps if the two models aren't resident
-simultaneously. Not implemented here; flagged as a possible future
-direction, not attempted.
-
-**Context length *is* genuinely per-model — but not via Hermes' config.**
-Checked Hermes' actual source
-(`hermes_cli/model_switch.py`): a `model_aliases` entry parses into a
-`DirectAlias` — a `NamedTuple` of exactly `model`, `provider`, `base_url`.
-No context field exists there at all. Setting `context_length` or
-`ollama_num_ctx` only works in the single top-level `model:` block, and
-applies to whichever model is currently active — not per-alias.
-
-**What `context_length` and `ollama_num_ctx` actually do (from Hermes'
-source, `agent/agent_init.py`):**
-
-- If `ollama_num_ctx` is set explicitly, Hermes forces that exact value for
-  every request, to every model, no matter what that model actually
-  supports. This is what earlier versions of this script did, hardcoded.
-- If `ollama_num_ctx` is *unset* (this script's current behavior) and the
-  endpoint is local, Hermes queries Ollama's `/api/show` for the *currently
-  active model* and reads its real trained context from GGUF metadata —
-  genuinely per-model, automatically, no config needed.
-- `context_length`, if set, then acts as a **ceiling** on that
-  auto-detected value — it does not force it up. A model with a smaller
-  native context than the ceiling just uses its own smaller value.
-- Ollama's daemon-side `OLLAMA_CONTEXT_LENGTH` env var is the fallback of
-  last resort if auto-detection fails for any reason (network hiccup,
-  non-Ollama endpoint, etc.) — set it in Ollama's own config so a detection
-  failure doesn't silently fall back to Ollama's un-set default (2048).
-
-**Why this matters, confirmed by live testing on an RTX 4060 8 GB:**
-`qwen3.5:4b`'s real native context is 262144 (GDN hybrid — no clamp);
-`qwen3:8b`'s is 40960. Hermes itself refuses to use *any* model whose
-effective context is below 64,000 tokens ("Hermes needs at least 64,000
-tokens for reliable tool use") — so `qwen3:8b` at its honest native context
-doesn't even meet Hermes' own floor. Forcing it up via `ollama_num_ctx`
-(the only way to make Hermes accept it) technically works, but the model's
-loaded footprint (8.8 GB) then exceeds the 8 GB card: confirmed **22%/78%
-CPU/GPU split** and **70+ seconds for a trivial request**, versus **5.4
-seconds** requesting its own correct 40960 directly (still split, since 8.8
-GB just doesn't fit regardless of context — the context override wasn't
-even the main problem there, the model's size was). Both numbers are cold
-loads (first request after the model wasn't resident) — a warm/already-loaded
-model responds much faster than either figure; the *relative* gap between
-them is the meaningful part, not the absolute seconds.
-
-**The takeaway:** don't add a second `HERMES_ALIASES` entry for a model
-whose real context is under ~64K, or whose loaded footprint doesn't
-comfortably fit your VRAM at that context — check both with `curl
-localhost:11434/api/show -d '{"name":"<model>"}'` (look at
-`model_info.*.context_length` and any Modelfile `num_ctx` under
-`parameters`) before adding it, not after.
-
-**Not included:** a Claude/Anthropic-API model alias. Hermes' remote-model
-support needs a billed [console.anthropic.com](https://console.anthropic.com)
-API key — separate from, and not covered by, a Claude Code subscription. If
-you want Claude available inside Hermes, add your own `model_aliases` entry
-in `~/.hermes/config.yaml` with your own key.
-
-**Not included:** an MCP/RAG bridge. If you're pairing this with a
-self-hosted Open WebUI RAG instance, see
-[rag-stack](https://github.com/dktaylor/rag-stack), which owns and
-maintains the MCP bridge for that.
+**Not included:** a Claude/Anthropic-API model alias, or an MCP/RAG bridge.
+See [DECISIONS.md](DECISIONS.md) for why.
 
 ## License
 
