@@ -9,7 +9,10 @@
 #   1. Installs ripgrep (required by Hermes)
 #   2. Downloads and installs Hermes agent to ~/.hermes/
 #   3. Writes ~/.hermes/config.yaml (points at local Ollama; local/local-8b
-#      model aliases for switching between local models)
+#      model aliases for switching between local models) — model/context
+#      settings come from hermes.conf (edit it, or export the same-named
+#      env vars before running this script). See README.md for what the
+#      shipped defaults are tuned for.
 #   4. Copies the given context.md (if any) into ~/.hermes/ — this is your
 #      own project's Hermes system-prompt context, not part of this repo
 #
@@ -24,6 +27,15 @@ set -euo pipefail
 TARGET_USER="${1:-devuser}"
 CONTEXT_SRC="${2:-}"
 USER_HOME="/home/${TARGET_USER}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=hermes.conf
+source "$SCRIPT_DIR/hermes.conf"
+# HERMES_ALIASES is a bash array (name=model pairs) — can't be exported as
+# an env var directly, so serialize it one pair per line for the Python
+# patch step below to parse.
+HERMES_ALIASES_SERIALIZED="$(printf '%s\n' "${HERMES_ALIASES[@]}")"
+export HERMES_ALIASES_SERIALIZED HERMES_DEFAULT_ALIAS HERMES_CONTEXT_LENGTH OLLAMA_BASE_URL
 
 run_as_user() {
     sudo -u "$TARGET_USER" env HOME="$USER_HOME" PATH="$USER_HOME/.local/bin:$PATH" "$@"
@@ -55,61 +67,69 @@ if [[ -f "$HERMES_CONF" ]]; then
     cp "$HERMES_CONF" "${HERMES_CONF}.bak"
 fi
 
-# Patch key settings in-place (preserves all other defaults)
+# Patch key settings in-place (preserves all other defaults). Values come
+# from hermes.conf (HERMES_ALIASES / HERMES_DEFAULT_ALIAS /
+# HERMES_CONTEXT_LENGTH / OLLAMA_BASE_URL), exported above.
 python3 - "$HERMES_CONF" <<'PYEOF'
-import sys, re
+import os, sys, re
 
-path = sys.argv[1]
+path          = sys.argv[1]
+context_len   = os.environ["HERMES_CONTEXT_LENGTH"]
+base_url      = os.environ["OLLAMA_BASE_URL"]
+default_alias = os.environ["HERMES_DEFAULT_ALIAS"]
+
+aliases = dict(
+    line.split("=", 1)
+    for line in os.environ["HERMES_ALIASES_SERIALIZED"].splitlines()
+    if line.strip()
+)
+if default_alias not in aliases:
+    sys.exit(f"HERMES_DEFAULT_ALIAS={default_alias!r} is not a key in HERMES_ALIASES ({list(aliases)}) — fix hermes.conf")
+default_model = aliases[default_alias]
+
 with open(path) as f:
     content = f.read()
 
 patches = [
     # Default model
-    (r'(^\s*default:\s*")[^"]*(")', r'\g<1>qwen3.5:4b\2'),
+    (r'(^\s*default:\s*")[^"]*(")', rf'\g<1>{default_model}\2'),
     # Provider
     (r'(^\s*)provider:\s*"auto"', r'\1provider: "custom"  # local Ollama'),
     # Base URL
     (r'(^\s*)base_url:\s*"https://openrouter\.ai/api/v1"',
-     r'\1base_url: "http://localhost:11434/v1"'),
-    # Context length: qwen3.5:4b is natively 262K (GDN hybrid, no n_ctx_train
-    # clamp) — 131072 is honest, not a padded-up workaround like the old
-    # 64K-minimum-check bypass was for qwen2.5-coder.
-    (r'#\s*context_length:\s*131072', 'context_length: 131072'),
+     rf'\1base_url: "{base_url}"'),
+    # Context length (commented-out placeholder in Hermes' stock config.yaml)
+    (r'#\s*context_length:\s*\d+', f'context_length: {context_len}'),
 ]
 
 for pattern, replacement in patches:
     content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
 
-# Add ollama_num_ctx after context_length if not present
-# Must stay in sync with OLLAMA_CONTEXT_LENGTH in the ollama.service.d
-# override.conf — Ollama's /v1 endpoint can ignore this and silently fall
-# back to the daemon default (verified: unset daemon default loads at 4096).
+# Add ollama_num_ctx after context_length if not present. Must stay in sync
+# with whatever your Ollama daemon is actually configured for
+# (OLLAMA_CONTEXT_LENGTH) — Ollama's /v1 endpoint can silently ignore this
+# and fall back to the daemon default instead (verified: an unset daemon
+# default loads at 4096, not the model's real context window).
 if 'ollama_num_ctx' not in content:
     content = content.replace(
-        'context_length: 131072',
-        'context_length: 131072\n  ollama_num_ctx: 131072  # force Ollama 131K context window'
+        f'context_length: {context_len}',
+        f'context_length: {context_len}\n  ollama_num_ctx: {context_len}  # force this Ollama context window'
     )
 
-# Add model_aliases block if not present
+# Add model_aliases block if not present — one entry per HERMES_ALIASES pair
 if 'model_aliases:' not in content:
-    aliases = """
-model_aliases:
-  local:
-    model: qwen3.5:4b
-    provider: custom
-    base_url: "http://localhost:11434/v1"
-  local-8b:
-    model: qwen3:8b   # legacy fallback — clamps to 40960 ctx (no YaRN in GGUF)
-    provider: custom
-    base_url: "http://localhost:11434/v1"
-"""
+    entries = "\n".join(
+        f'  {name}:\n    model: {model}\n    provider: custom\n    base_url: "{base_url}"'
+        for name, model in aliases.items()
+    )
+    aliases_block = f"\nmodel_aliases:\n{entries}\n"
     # Insert before Privacy section
-    content = content.replace('# =============================================================================\n# Privacy', aliases + '# =============================================================================\n# Privacy')
+    content = content.replace('# =============================================================================\n# Privacy', aliases_block + '# =============================================================================\n# Privacy')
 
 with open(path, 'w') as f:
     f.write(content)
 
-print("  config.yaml patched.")
+print(f"  config.yaml patched. Aliases: {', '.join(aliases)} (default: {default_alias})")
 PYEOF
 
 chown "$TARGET_USER:$TARGET_USER" "$HERMES_CONF"
@@ -125,7 +145,11 @@ fi
 echo ""
 echo "  Hermes setup complete."
 echo "  Usage:"
-echo "    hermes -z 'your task'           # local Ollama (default model)"
-echo "    hermes -m local-8b -z 'your task'  # local Ollama (8b fallback)"
-echo "    hermes                          # interactive session"
+echo "    hermes -z 'your task'              # default alias: $HERMES_DEFAULT_ALIAS"
+for pair in "${HERMES_ALIASES[@]}"; do
+    alias_name="${pair%%=*}"
+    [[ "$alias_name" == "$HERMES_DEFAULT_ALIAS" ]] && continue
+    echo "    hermes -m $alias_name -z 'your task'  # alias: $alias_name"
+done
+echo "    hermes                             # interactive session"
 echo "=============================================="

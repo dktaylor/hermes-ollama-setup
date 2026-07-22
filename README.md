@@ -20,16 +20,59 @@ What it does, idempotently (safe to re-run):
 1. Installs `ripgrep` (Hermes dependency).
 2. Downloads and installs Hermes to `~/.local/bin/hermes`.
 3. Patches `~/.hermes/config.yaml`: default provider → `custom` pointing at
-   `http://localhost:11434/v1` (Ollama), plus `model_aliases` — `local` and
-   `local-8b` for switching between local models (edit the script's
-   `qwen3.5:4b` default to your own model).
+   Ollama, plus a `model_aliases` entry for every alias defined in
+   [`hermes.conf`](hermes.conf) (see **Configuration** below).
 4. Copies your `context.md` in, if you passed one.
 
-Usage after setup:
+## Configuration
+
+Model and context settings live in [`hermes.conf`](hermes.conf), not
+hardcoded in the script.
+
+**`HERMES_ALIASES`** is a bash array of `name=ollama-model-tag` pairs — one
+per line, as many as you want:
 
 ```bash
-hermes -z "your task"              # local Ollama — default model
-hermes -m local-8b -z "your task"  # local Ollama — 8b fallback
+HERMES_ALIASES=(
+    "local=qwen3.5:4b"
+    "local-8b=qwen3:8b"
+    # "coding=qwen2.5-coder:7b-instruct-q8_0"
+    # "big-context=qwen3.5:4b"
+)
+```
+
+Each `name` becomes both the YAML key under `model_aliases:` in
+`config.yaml` *and* the value you pass on the command line —
+`"coding=..."` above gives you `hermes -m coding -z "..."`. All aliases
+share the same `HERMES_CONTEXT_LENGTH` and `OLLAMA_BASE_URL` (below); it's a
+plain array, so it isn't env-var-overridable — edit it directly.
+
+The remaining settings are scalars, each overridable by exporting the
+same-named env var before running `setup-hermes.sh` (an exported var always
+wins over the file's default) instead of editing the file:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HERMES_DEFAULT_ALIAS` | `local` | Which `HERMES_ALIASES` key Hermes uses with no `-m` flag |
+| `HERMES_CONTEXT_LENGTH` | `131072` | Written to both `context_length` and `ollama_num_ctx` in `config.yaml` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama's OpenAI-compatible endpoint |
+
+**The shipped defaults are tuned for an 8 GB dGPU (RTX 4060)** —
+`qwen3.5:4b` with **q8_0 KV cache quantization** and **131072 (128K)
+context** is what fits in 8 GB of VRAM alongside a small embedding model on
+this hardware. `q8_0` is set on the *Ollama* side, not by this script
+(`OLLAMA_KV_CACHE_TYPE=q8_0` in Ollama's systemd `override.conf`, or the
+equivalent env var if you run Ollama another way) — `HERMES_CONTEXT_LENGTH`
+here needs to match whatever your own Ollama setup can actually hold, at
+whatever quantization you use. If you have more or less VRAM, or a different
+GPU vendor, adjust `HERMES_ALIASES` and `HERMES_CONTEXT_LENGTH` (and your
+Ollama-side KV cache setting) to fit.
+
+Usage after setup (with the shipped defaults):
+
+```bash
+hermes -z "your task"              # default alias (local)
+hermes -m local-8b -z "your task"  # local-8b alias
 hermes                             # interactive session
 ```
 
